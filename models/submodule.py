@@ -145,7 +145,12 @@ class feature_extraction(nn.Module):
 
         output_branch4 = self.branch4(output_skip)
         output_branch4 = F.upsample(output_branch4, (output_skip.size()[2],output_skip.size()[3]),mode='bilinear')
-        # 
+        
+        '''
+        we concatenate all the feature maps and pass them through 2D convolutional layers.
+        This process yields 32-channel feature representations for all the input images, which are next used
+        in building cost volumes.
+        '''
         output_feature = torch.cat((output_raw, output_skip, output_branch4, output_branch3, output_branch2, output_branch1), 1)
         output_feature = self.lastconv(output_feature)
 

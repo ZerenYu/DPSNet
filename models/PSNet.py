@@ -22,7 +22,10 @@ class PSNet(nn.Module):
         self.mindepth = mindepth
 
         self.feature_extraction = feature_extraction()
-
+        '''
+        The context network consists of seven convolutional layers with 3 × 3 filters, where each layer has a different receptive field (1, 2, 4, 8, 16, 1, and 1)
+        This thing gonna be a lot prettier if using tranformer, basically we want 
+        '''
         self.convs = nn.Sequential(
             convtext(33, 128, 3, 1, 1),
             convtext(128, 128, 3, 1, 2),
@@ -90,17 +93,28 @@ class PSNet(nn.Module):
         intrinsics_inv4[:,:2,:2] = intrinsics_inv4[:,:2,:2] * 4
 
         refimg_fea     = self.feature_extraction(ref)
-
+        # TODO: Using channel 0, 2, 3 to construct a volume， it will make sense if batch x width x height not sure here. implies 1 is channel? Why multiply nlabel here?
         disp2depth = Variable(torch.ones(refimg_fea.size(0), refimg_fea.size(2), refimg_fea.size(3))).cuda() * self.mindepth * self.nlabel
         for j, target in enumerate(targets):
+            # shape batch x channel x lth plane x W x H
             cost = Variable(torch.FloatTensor(refimg_fea.size()[0], refimg_fea.size()[1]*2, self.nlabel,  refimg_fea.size()[2],  refimg_fea.size()[3]).zero_()).cuda()
-            targetimg_fea  = self.feature_extraction(target)
+            targetimg_fea  = self.feature_extraction(target) # the cat 32 channel feature of target frame
             for i in range(self.nlabel):
-                depth = torch.div(disp2depth, i+1e-16)
-                targetimg_fea_t = inverse_warp(targetimg_fea, depth, pose[:,j], intrinsics4, intrinsics_inv4)
+                '''
+                uniformly sample them in the inverse-depth space as follows dl = (L x dmin)/l
+                '''
+                depth = torch.div(disp2depth, i+1e-16) # This is a depth mappig set as default as the mindepth * nlabel/l
+                # targetimg_feature might be how things in reference looks like in target_feature j if all the feature are at depth i
+                targetimg_fea_t = inverse_warp(targetimg_fea, depth, pose[:,j], intrinsics4, intrinsics_inv4) 
+                # channels are concadicated here :32 is refimg_fea 32: is targetimg 
                 cost[:, :refimg_fea.size()[1], i, :,:] = refimg_fea
                 cost[:, refimg_fea.size()[1]:, i, :,:] = targetimg_fea_t
 
+            '''
+            Given the 4D volume1, our DPSNet learns a cost volume generation of size W × H × L 
+            by using a series of 3D convolutions on the concatenated features. 
+            All of the convolutional layers consist of 3 × 3 × 3 filters and residual blocks.
+            '''
             cost = cost.contiguous()
             cost0 = self.dres0(cost)
             cost0 = self.dres1(cost0) + cost0
@@ -114,17 +128,28 @@ class PSNet(nn.Module):
             else:
                 costs = costs + cost0
 
+        '''
+        w x h x l channel has been reduced to 1 but still i pairs
+        '''
         costs = costs/len(targets)
-
+        # B x 1 x L x w x h
         costss = Variable(torch.FloatTensor(refimg_fea.size()[0], 1, self.nlabel,  refimg_fea.size()[2],  refimg_fea.size()[3]).zero_()).cuda()
         for i in range(self.nlabel):
+            '''
+            The context network takes each slice of the cost volume and the reference image features extracted from the previous step, and then outputs the refined cost slice
+            '''
             costt = costs[:, :, i, :, :]
             costss[:, :, i, :, :] = self.convs(torch.cat([refimg_fea, costt],1)) + costt
-
+        '''
+        we upsample the cost volume, whose size is equal to the feature size, to the original size of the images via bilinear interpolation.
+        '''
         costs = F.upsample(costs, [self.nlabel,ref.size()[2],ref.size()[3]], mode='trilinear')
         costs = torch.squeeze(costs,1)
+        # The probability of each label l is calculated from the predicted cost cl via the softmax operation σ(·)
         pred0 = F.softmax(costs,dim=1)
+        # The predicted label l ˆ is computed as the sum of each label l weighted by its probability
         pred0 = disparityregression(self.nlabel)(pred0)
+        # With the predicted label, the depth is calculated from the number of labels L and minimum scene depth dmin
         depth0 = self.mindepth*self.nlabel/(pred0.unsqueeze(1)+1e-16)
 
         costss = F.upsample(costss, [self.nlabel,ref.size()[2],ref.size()[3]], mode='trilinear')

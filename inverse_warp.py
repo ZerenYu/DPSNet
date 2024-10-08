@@ -96,6 +96,16 @@ def inverse_warp(feat, depth, pose, intrinsics, intrinsics_inv, padding_mode='ze
 
     batch_size, _, feat_height, feat_width = feat.size()
 
+    '''
+    depth is in 2d frame so it kind of did this 
+    
+    |                       |||*||    
+    |       d_l             |||*||     
+    |  ------------------>  |||*||
+    |                       |||*||
+    |                       |||*||  
+    fill the meat in layers assuming all the feature in the same depth 
+    '''
     cam_coords = pixel2cam(depth, intrinsics_inv) 
 
     pose_mat = pose
@@ -103,7 +113,10 @@ def inverse_warp(feat, depth, pose, intrinsics, intrinsics_inv, padding_mode='ze
 
     # Get projection matrix for tgt camera frame to source pixel frame
     proj_cam_to_src_pixel = intrinsics.bmm(pose_mat)  # [B, 3, 4]
-
+    '''
+    I think it is just inverse of pixel2cam 
+    So what happened here is we project 2d feature in reference to 3d voxels, and then project voxels back to 2d in target frame
+    '''
     src_pixel_coords = cam2pixel(cam_coords, proj_cam_to_src_pixel[:,:,:3], proj_cam_to_src_pixel[:,:,-1:], padding_mode)  # [B,H,W,2]
     projected_feat = torch.nn.functional.grid_sample(feat, src_pixel_coords, padding_mode=padding_mode)
 
