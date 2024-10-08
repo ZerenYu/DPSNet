@@ -83,7 +83,7 @@ class PSNet(nn.Module):
 
 
     def forward(self, ref, targets, pose, intrinsics, intrinsics_inv):
-
+        # forward pass of the model
         intrinsics4 = intrinsics.clone()
         intrinsics_inv4 = intrinsics_inv.clone()
         intrinsics4[:,:2,:] = intrinsics4[:,:2,:] / 4

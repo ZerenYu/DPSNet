@@ -117,13 +117,23 @@ class feature_extraction(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
+        '''
+        We first pass a reference image and target images through seven convolutional layers (3 × 3 filters
+        except for the first layer, which has a 7 × 7 filter) to encode them
+        '''
         output      = self.firstconv(x)
         output      = self.layer1(output)
         output_raw  = self.layer2(output)
         output      = self.layer3(output_raw)
         output_skip = self.layer4(output)
-
-
+        '''
+        extract hierarchical contextual
+        information from these images using a spatial pyramid pooling (SPP) module He et al. (2014) with
+        four fixed-size average pooling blocks (16 × 16, 8 × 8, 4 × 4, 2 × 2).
+        
+        upsampling the hierarchical contextual information to the same size as the original
+        feature map
+        '''
         output_branch1 = self.branch1(output_skip)
         output_branch1 = F.upsample(output_branch1, (output_skip.size()[2],output_skip.size()[3]),mode='bilinear')
 
@@ -135,7 +145,7 @@ class feature_extraction(nn.Module):
 
         output_branch4 = self.branch4(output_skip)
         output_branch4 = F.upsample(output_branch4, (output_skip.size()[2],output_skip.size()[3]),mode='bilinear')
-
+        # 
         output_feature = torch.cat((output_raw, output_skip, output_branch4, output_branch3, output_branch2, output_branch1), 1)
         output_feature = self.lastconv(output_feature)
 
